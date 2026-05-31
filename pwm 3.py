@@ -180,7 +180,7 @@ def train_model():
         'emissions': None,      
         'log_emissions': None   
     }
-    
+
 def decoder_hmm(seq_str, tokens, p_start=1e-4, p_stop=1e-3, pwm_weight=1.5):
     """
     Viterbi HMM Decoder for long-range gene structure parsing.
