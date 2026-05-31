@@ -1,0 +1,724 @@
+import json
+import numpy as np
+import pandas as pd
+from Bio import SeqIO, Entrez
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score,
+    f1_score, matthews_corrcoef, mean_absolute_error,
+    confusion_matrix, roc_auc_score, roc_curve, auc, balanced_accuracy_score
+)
+import seaborn as sns
+import warnings
+import matplotlib.pyplot as plt
+import pickle
+import argparse
+import os
+
+warnings.filterwarnings('ignore')
+Entrez.email = "example@example.com"
+
+# ─────────────────────────────────────────────
+# GLOBAL VARIABLES
+# ─────────────────────────────────────────────
+nuc2idx = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
+pwm_logo = None
+codon_vocab = {}
+emissions = None
+log_emissions = None
+codon_log_odds_map = None  # NEW: v3 Discriminator
+
+hmm_emissions_bg = None
+hmm_emissions_cds = None
+
+# ─────────────────────────────────────────────
+# SCORING FUNCTIONS
+# ─────────────────────────────────────────────
+def score_promoter(window):
+    if len(window) != 50:
+        return -999.0
+    return sum(pwm_logo[nuc2idx.get(c, 0), i] for i, c in enumerate(window))
+
+def score_coding_potential(sequence, log_odds_map):
+    """v3: Scores based on Codon Log-Odds (CDS vs Intergenic)"""
+    score = 0.0
+    valid_codons = 0
+    for i in range(0, len(sequence)-2, 3):
+        codon = sequence[i:i+3]
+        if codon in log_odds_map:
+            score += log_odds_map[codon]
+            valid_codons += 1
+    return score / valid_codons if valid_codons > 0 else 0.0
+
+def encode(seq_str):
+    return [codon_vocab.get(seq_str[i:i+3], codon_vocab["UNK"])
+            for i in range(0, len(seq_str)-2, 3)]
+
+# ─────────────────────────────────────────────
+# DATA LOADING & TRAINING
+# ─────────────────────────────────────────────
+def load_training_sources(filepath="training_sources.json"):
+    try:
+        with open(filepath, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading {filepath}: {e}")
+        return []
+
+def train_model():
+    print("1. Fetching Pan-Eukaryotic Training Data & Mining Background...")
+    training_sources = load_training_sources()
+    train_cds = []
+    pwm_counts = np.ones((4, 50)) * 1e-4
+    
+    # Laplace smoothing for Codon Frequencies
+    all_codons = [a+b+c for a in "ACGT" for b in "ACGT" for c in "ACGT"]
+    cds_counts = {c: 1 for c in all_codons}
+    bg_counts  = {c: 1 for c in all_codons}
+    
+    seen_tis = set() 
+    metadata_log = []
+
+    for source in training_sources:
+        print(f"   -> Pulling {source['name']}...")
+        try:
+            fetch_params = {"db": "nucleotide", "id": source["id"], "rettype": "gbwithparts", "retmode": "text"}
+            if source.get("start") and source.get("stop"):
+                fetch_params["seq_start"], fetch_params["seq_stop"] = source["start"], source["stop"]
+                offset = source["start"]
+            else:
+                offset = 0
+            
+            with Entrez.efetch(**fetch_params) as handle:
+                rec_train = SeqIO.read(handle, "genbank")
+            
+            # 1. Extract CDS (Positives)
+            source_cds_count = 0
+            last_end = 0
+            cds_intervals = []
+            
+            for f in sorted([f for f in rec_train.features if f.type == "CDS"], key=lambda x: int(x.location.start)):
+                strand = f.location.strand
+                tis_rel = int(f.location.start) if strand == 1 else int(f.location.end) - 1
+                cds_intervals.append((int(f.location.start), int(f.location.end)))
+                
+                ws, we = (tis_rel - 150, tis_rel + 150) if strand == 1 else (tis_rel - 149, tis_rel + 151)
+                tis_abs = tis_rel + (offset - 1 if offset > 0 else 0)
+
+                if (source["id"], tis_abs) in seen_tis: continue
+                seen_tis.add((source["id"], tis_abs))
+
+                if ws >= 0 and we <= len(rec_train.seq):
+                    chunk = rec_train.seq[ws:we]
+                    if strand == -1: chunk = chunk.reverse_complement()
+                    seq_str = str(chunk).upper()
+                    
+                    if len(seq_str) == 300 and seq_str[150:153] == "ATG":
+                        train_cds.append((seq_str, [0]*50 + [1] + [2]*48 + [3], {}))
+                        source_cds_count += 1
+                        
+                        # Update PWM
+                        for i, nuc in enumerate(seq_str[100:150]):
+                            if nuc in nuc2idx: pwm_counts[nuc2idx[nuc], i] += 1
+                                
+                        # Update CDS Codon Usage
+                        downstream = seq_str[153:243] # 90bp
+                        for i in range(0, len(downstream)-2, 3):
+                            codon = downstream[i:i+3]
+                            if codon in cds_counts: cds_counts[codon] += 1
+            
+            # 2. Extract Intergenic Background (Negatives)
+            bg_count = 0
+            for start, end in cds_intervals:
+                if int(start) > last_end + 300:
+                    # Found intergenic space, extract a 90bp chunk for background
+                    mid_point = last_end + ((int(start) - last_end) // 2)
+                    bg_chunk = str(rec_train.seq[mid_point:mid_point+90]).upper()
+                    if len(bg_chunk) == 90 and all(c in "ACGT" for c in bg_chunk):
+                        for i in range(0, 90-2, 3):
+                            codon = bg_chunk[i:i+3]
+                            if codon in bg_counts: bg_counts[codon] += 1
+                        bg_count += 1
+                last_end = max(last_end, int(end))
+                
+            print(f"      Gathered {source_cds_count} CDS and {bg_count} Intergenic chunks.")
+        except Exception as e:
+            print(f"      [!] Failed {source['name']}: {e}")
+
+   # Calculate PWM (Base 2 / Natural Log - let's use natural log for consistency)
+    pwm = pwm_counts / pwm_counts.sum(axis=0, keepdims=True)
+    bg = np.array([0.25]*4).reshape(4,1)
+    pwm_logo_val = np.log(pwm / bg) # Switched to natural log for native math matches
+
+    # Calculate Formal Log Probability Emissions for HMM
+    total_cds = sum(cds_counts.values())
+    total_bg = sum(bg_counts.values())
+    
+    log_p_cds = {c: np.log(count / total_cds) for c, count in cds_counts.items()}
+    log_p_bg = {c: np.log(count / total_bg) for c, count in bg_counts.items()}
+
+    # Backwards compatibility map for vocab indices
+    codon_vocab_val = {c: i for i, c in enumerate(all_codons)}
+    codon_vocab_val["UNK"] = 64
+    
+    # Pack array-indexed emission tables for fast matrix evaluation
+    hmm_emissions_bg = np.array([log_p_bg.get(c, -10.0) for c in all_codons] + [-10.0])
+    hmm_emissions_cds = np.array([log_p_cds.get(c, -10.0) for c in all_codons] + [-10.0])
+
+    # FIX 1: Calculate the codon log-odds (CDS log prob - Background log prob)
+    codon_log_odds_val = {
+        c: log_p_cds.get(c, -10.0) - log_p_bg.get(c, -10.0)
+        for c in all_codons
+    }
+
+    return {
+        'pwm_logo': pwm_logo_val,
+        'codon_vocab': codon_vocab_val,
+        'hmm_emissions_bg': hmm_emissions_bg,
+        'hmm_emissions_cds': hmm_emissions_cds,
+        'codon_log_odds': codon_log_odds_val,
+        # FIX 2: Pad legacy keys expected by main() to prevent KeyErrors
+        'emissions': None,      
+        'log_emissions': None   
+    }
+    
+def decoder_hmm(seq_str, tokens, p_start=1e-4, p_stop=1e-3, pwm_weight=1.5):
+    """
+    Viterbi HMM Decoder for long-range gene structure parsing.
+    States: 0 = Intergenic, 1 = TIS, 2 = CDS
+    """
+    global hmm_emissions_bg, hmm_emissions_cds, pwm_logo, codon_vocab
+    
+    N = len(tokens)
+    if N == 0:
+        return [0] * N
+
+    # 1. Initialize Log-Transition Matrix
+    # State 0->0, 0->1, 0->2
+    T_0 = [np.log(1.0 - p_start), np.log(p_start), -np.inf]
+    # State 1->0, 1->1, 1->2 (Forces mandatory transition straight into CDS)
+    T_1 = [-np.inf, -np.inf, 0.0]
+    # State 2->0, 2->1, 2->2 (Enforces long-range continuity penalty)
+    T_2 = [np.log(p_stop), -np.inf, np.log(1.0 - p_stop)]
+    
+    A = np.array([T_0, T_1, T_2])
+
+    # 2. Dynamic Programming Trellis Setup
+    # V[state, time]
+    V = np.full((3, N), -np.inf)
+    backpointer = np.zeros((3, N), dtype=int)
+
+    # Base case initialization (Start safely in Intergenic space)
+    V[0, 0] = hmm_emissions_bg[tokens[0]]
+    if tokens[0] == codon_vocab.get("ATG"):
+        upstream = seq_str[0:0] # Edge check
+        V[1, 0] = hmm_emissions_bg[tokens[0]] + (score_promoter(upstream) * pwm_weight)
+
+    # 3. Viterbi Forward Pass Loop
+    for t in range(1, N):
+        # Cache emission checks for time step t
+        tok = tokens[t]
+        emb_bg = hmm_emissions_bg[tok]
+        emb_cds = hmm_emissions_cds[tok]
+
+        for s_curr in range(3):
+            # Compute potential transitions from all previous states
+            scores = np.zeros(3)
+            for s_prev in range(3):
+                scores[s_prev] = V[s_prev, t-1] + A[s_prev, s_curr]
+
+            best_prev_state = np.argmax(scores)
+            backpointer[s_curr, t] = best_prev_state
+            
+            # Calculate Contextual State-Emission Modifiers
+            if s_curr == 0:
+                V[s_curr, t] = scores[best_prev_state] + emb_bg
+            elif s_curr == 1:
+                # Gatekeeper logic: State 1 can ONLY be claimed by an actual ATG sequence
+                if tok == codon_vocab.get("ATG"):
+                    nuc_idx = t * 3
+                    upstream = seq_str[nuc_idx-50:nuc_idx]
+                    p_score = score_promoter(upstream) if len(upstream) == 50 else -20.0
+                    V[s_curr, t] = scores[best_prev_state] + emb_bg + (p_score * pwm_weight)
+                else:
+                    V[s_curr, t] = -np.inf # Structural layout violation
+            elif s_curr == 2:
+                V[s_curr, t] = scores[best_prev_state] + emb_cds
+
+    # 4. Backtracking State Path Identification
+    path = [0] * N
+    best_last_state = np.argmax(V[:, N-1])
+    
+    # If the sequence fails completely to resolve or ends up stuck in invalid layout
+    if V[best_last_state, N-1] == -np.inf:
+        best_last_state = 0 
+
+    path[N-1] = best_last_state
+
+    for t in range(N-2, -1, -1):
+        path[t] = backpointer[path[t+1], t+1]
+
+    # Normalize output labels to match evaluation system expectations:
+    # 0 = Intergenic, 1 = TIS location, 2 = CDS
+    normalized_path = [0] * N
+    in_cds = False
+    for i in range(N):
+        if path[i] == 1:
+            normalized_path[i] = 1
+            in_cds = True
+        elif path[i] == 2 or in_cds:
+            # Enforce persistence rules if lingering in structural sequence blocks
+            if path[i] == 0: 
+                in_cds = False # Broke out of gene via structural transition
+                normalized_path[i] = 0
+            else:
+                normalized_path[i] = 2
+        else:
+            normalized_path[i] = 0
+
+    return normalized_path
+
+
+
+# ─────────────────────────────────────────────
+# DECODERS (v1, v2, v3)
+# ─────────────────────────────────────────────
+
+def decoder_stride1_naive(seq_str, tokens):
+    """
+    Naive Stride-1 Baseline: Scans the raw string char-by-char.
+    Detects EVERY ATG regardless of frame and picks the best PWM score.
+    """
+    best_idx, best_score = -1, -np.inf
+    
+    # Scan char-by-char (Stride 1) - simulates no tokenization
+    for i in range(len(seq_str) - 2):
+        if seq_str[i:i+3] == "ATG":
+            upstream = seq_str[i-50:i]
+            if len(upstream) == 50:
+                p_score = score_promoter(upstream)
+                if p_score > best_score:
+                    best_score = p_score
+                    best_idx = i
+                    
+    path = [0] * len(tokens)
+    if best_idx != -1:
+        # Map char index back to token index for compatibility with eval pipeline
+        tok_idx = best_idx // 3
+        if tok_idx < len(path):
+            path[tok_idx] = 1
+            for i in range(tok_idx + 1, len(tokens)): path[i] = 2
+    return path
+
+def decoder_v1(seq_str, tokens):
+    best_start, best_score = -1, -np.inf
+    for t, tok in enumerate(tokens):
+        if tok == codon_vocab["ATG"]:
+            nuc_idx = t * 3
+            upstream = seq_str[nuc_idx-50:nuc_idx]
+            if len(upstream) == 50:
+                p = score_promoter(upstream)
+                if p > best_score: best_score, best_start = p, t
+    path = [0] * len(tokens)
+    if best_start != -1:
+        path[best_start] = 1
+        for i in range(best_start+1, len(tokens)): path[i] = 2
+    return path
+
+def decoder_v2(seq_str, tokens, pwm_threshold=-5.0, min_cds_len_bp=90):
+    candidates = []
+    for t, tok in enumerate(tokens):
+        if tok == codon_vocab["ATG"]:
+            nuc_idx = t * 3
+            upstream = seq_str[nuc_idx-50:nuc_idx]
+            if len(upstream) == 50:
+                p_score = score_promoter(upstream)
+                if p_score >= pwm_threshold:
+                    candidates.append((p_score, t))
+    if not candidates: return [0] * len(tokens)
+    _, best_start = max(candidates)
+    if (len(tokens) - best_start - 1) * 3 < min_cds_len_bp: return [0] * len(tokens)
+    path = [0] * len(tokens)
+    path[best_start] = 1
+    for i in range(best_start+1, len(tokens)): path[i] = 2
+    return path
+
+def decoder_v3(seq_str, tokens, pwm_threshold=-5.0, cub_weight=2.0):
+    """v3 Contextual Gatekeeper: Uses Log-Odds Ratio for precise discrimination."""
+    candidates = []
+    global codon_log_odds_map
+    
+    for t, tok in enumerate(tokens):
+        if tok == codon_vocab["ATG"]:
+            nuc_idx = t * 3
+            upstream = seq_str[nuc_idx-50:nuc_idx]
+            downstream = seq_str[nuc_idx+3:nuc_idx+93] 
+            
+            if len(upstream) == 50 and len(downstream) >= 90:
+                p_score = score_promoter(upstream)
+                if p_score >= pwm_threshold:
+                    cub_score = score_coding_potential(downstream, codon_log_odds_map)
+                    total_score = p_score + (cub_score * cub_weight)
+                    candidates.append((total_score, t))
+
+    if not candidates: return [0] * len(tokens)
+    _, best_start = max(candidates)
+    path = [0] * len(tokens)
+    path[best_start] = 1
+    for i in range(best_start+1, len(tokens)): path[i] = 2
+    return path
+
+def decoder_baseline(seq_str, tokens):
+    """Baseline: Plain codon tokenization - predicts first ATG as TIS."""
+    path = [0] * len(tokens)
+    for t, tok in enumerate(tokens):
+        if tok == codon_vocab["ATG"]:
+            path[t] = 1
+            for i in range(t+1, len(tokens)): path[i] = 2
+            return path
+    return path
+
+# ─────────────────────────────────────────────
+# PIPELINE & EVALUATION
+# ─────────────────────────────────────────────
+def prepare_test_data(rec_test):
+    test_cds_wins = []
+    seen_test_tis = set()
+    
+    for f in rec_test.features:
+        if f.type == "CDS":
+            strand = f.location.strand
+            tis_rel = int(f.location.start) if strand == 1 else int(f.location.end) - 1
+            ws, we = (tis_rel - 150, tis_rel + 150) if strand == 1 else (tis_rel - 149, tis_rel + 151)
+                
+            if tis_rel in seen_test_tis: continue
+            seen_test_tis.add(tis_rel)
+
+            if ws >= 0 and we <= len(rec_test.seq):
+                chunk = rec_test.seq[ws:we]
+                if strand == -1: chunk = chunk.reverse_complement()
+                seq_str = str(chunk).upper()
+                if len(seq_str) == 300 and seq_str[150:153] == "ATG" and all(c in "ACGT" for c in seq_str):
+                    test_cds_wins.append((seq_str, [0]*50 + [1] + [2]*48 + [3]))
+
+    intergenics = []
+    last_end = 0
+    for f in sorted([f for f in rec_test.features if f.type == "CDS"], key=lambda x: int(x.location.start)):
+        if int(f.location.start) > last_end + 300:
+            intergenics.append((int(last_end), int(f.location.start)))
+        last_end = max(last_end, int(f.location.end))
+
+    test_int_wins = []
+    for start, end in intergenics:
+        for i in range(start, end - 300, 300):
+            seq_str = str(rec_test.seq[i:i+300]).upper()
+            if all(c in "ACGT" for c in seq_str):
+                test_int_wins.append((seq_str, [0]*100))
+
+    np.random.seed(42)
+    np.random.shuffle(test_cds_wins)
+    np.random.shuffle(test_int_wins)
+    return test_cds_wins[:1000] + test_int_wins[:1000]
+
+def evaluate(decoder_fn, label, test_data):
+    all_t, all_p, all_scores = [], [], []
+    true_starts, pred_starts = [], []
+    exact_hits, total_cds = 0, 0
+
+    for seq, lbls in test_data:
+        toks = encode(seq)
+        preds = decoder_fn(seq, toks)
+        
+        # FIX: Initialize a fallback baseline score for sequences with no predicted TIS
+        final_score = -999.0 
+        
+        if 1 in preds:
+            p_s = preds.index(1)
+            if label == "v3":
+                p_score = score_promoter(seq[p_s*3-50 : p_s*3])
+                cub = score_coding_potential(seq[p_s*3+3 : p_s*3+93], codon_log_odds_map)
+                final_score = p_score + (cub * 2.0)
+            elif label == "baseline":
+                final_score = 1.0 
+            elif label == "hmm":
+                # For the ROC curve, we can approximate the HMM's local confidence 
+                # using the promoter score at its predicted TIS location
+                final_score = score_promoter(seq[p_s*3-50 : p_s*3])
+            else:
+                final_score = score_promoter(seq[p_s*3-50 : p_s*3])
+        
+        bin_t = [1 if x > 0 else 0 for x in lbls]
+        bin_p = [1 if x > 0 else 0 for x in preds]
+        
+        all_t.append(1 if sum(bin_t) > 0 else 0)
+        all_p.append(1 if sum(bin_p) > 0 else 0)
+        all_scores.append(final_score)
+
+        if 1 in lbls:
+            total_cds += 1
+            t_s = lbls.index(1)
+            
+            # Move the true_starts append inside this condition
+            if 1 in preds:
+                p_s = preds.index(1)
+                true_starts.append(t_s * 3)  # Tracks ONLY when a prediction exists
+                pred_starts.append(p_s * 3)  # Tracks ONLY when a prediction exists
+                if p_s == t_s: 
+                    exact_hits += 1
+
+    acc  = accuracy_score(all_t, all_p)
+    prec = precision_score(all_t, all_p, zero_division=0)
+    rec  = recall_score(all_t, all_p, zero_division=0)
+    f1   = f1_score(all_t, all_p, zero_division=0)
+    mcc  = matthews_corrcoef(all_t, all_p)
+    mae  = mean_absolute_error(true_starts, pred_starts) if true_starts else 0
+    exact_rate = exact_hits / total_cds if total_cds else 0
+
+    tn, fp, fn, tp = confusion_matrix(all_t, all_p, labels=[0, 1]).ravel()
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+    bal_acc = balanced_accuracy_score(all_t, all_p)
+
+    return dict(label=label, accuracy=acc, precision=prec, recall=rec,
+                f1=f1, mcc=mcc, mae=mae, exact_rate=exact_rate,
+                specificity=specificity, balanced_accuracy=bal_acc,
+                y_true=all_t, y_pred=all_p, y_scores=all_scores)
+    
+# ─────────────────────────────────────────────
+# DIAGNOSTICS & PLOTTING
+# ─────────────────────────────────────────────
+def generate_aggregate_diagnostics_v3(tprs_dict, aucs_dict, mean_fpr, cms_dict):
+    plt.style.use('seaborn-v0_8-whitegrid')
+    # Use 5 columns for: naive, baseline, v1, v2, v3
+    fig, axes = plt.subplots(6, 2, figsize=(15, 30)) 
+    fig.suptitle("Cross-Eukaryotic TIS Prediction Benchmark", 
+                 fontsize=22, fontweight='bold', y=0.98)
+
+    versions = ["naive", "baseline", "v1", "v2", "v3", "hmm"]
+    colors = ['#000000', '#808080', '#4C72B0', '#55A868', '#C44E52', '#8172B3']
+    cm_cmaps = ['Greys', 'Purples', 'Blues', 'Greens', 'Reds', 'Oranges']
+
+    for i, ver in enumerate(versions):
+        ax_roc = axes[i, 0]
+        ax_cm = axes[i, 1]
+        
+        current_tprs = tprs_dict.get(ver, [])
+        
+        # Check if we actually have data for this version
+        if not current_tprs or len(current_tprs) == 0:
+            ax_roc.set_title(f"{ver.upper()} (No Data)")
+            ax_cm.set_title(f"{ver.upper()} (No Data)")
+            continue
+
+        # Ensure we are taking the mean across the correct axis
+        mean_tpr = np.mean(current_tprs, axis=0)
+        
+        # Fix for the TypeError: Verify mean_tpr is an array before indexing
+        if isinstance(mean_tpr, np.ndarray) and mean_tpr.ndim > 0:
+            mean_tpr[-1] = 1.0
+            mean_auc = auc(mean_fpr, mean_tpr)
+            std_tpr = np.std(current_tprs, axis=0)
+
+            ax_roc.plot(mean_fpr, mean_tpr, color=colors[i], lw=3, label=f'Mean (AUC={mean_auc:.3f})')
+            ax_roc.fill_between(mean_fpr, np.maximum(mean_tpr - std_tpr, 0), 
+                                np.minimum(mean_tpr + std_tpr, 1), color=colors[i], alpha=0.2)
+        
+        ax_roc.plot([0, 1], [0, 1], color='gray', linestyle='--')
+        ax_roc.set_title(f"{ver.upper()} ROC Curve", fontsize=14, fontweight='bold')
+        ax_roc.legend(loc="lower right")
+
+        sns.heatmap(cms_dict[ver], annot=True, fmt='d', cmap=cm_cmaps[i], ax=ax_cm, cbar=False,
+                    xticklabels=['Intergenic', 'CDS'], yticklabels=['Intergenic', 'CDS'],
+                    annot_kws={"size": 18})  # Adjust 18 to your preferred font size
+        ax_cm.set_title(f"{ver.upper()} Confusion Matrix", fontsize=14, fontweight='bold')
+        ax_cm.set_xlabel("Predicted")
+        ax_cm.set_ylabel("True")
+
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.savefig("v3_comprehensive_comparison.png", dpi=300)
+    plt.close()
+    print("[✔] Saved -> v3_comprehensive_comparison.png")
+
+def plot_resolution_sharpness():
+    """Generates the IEEE Proof graph using a synthetic ideal sequence."""
+    print("\nGenerating IEEE Sharpness Plot...")
+    
+    # Synthetic sequence: 100bp junk + 50bp Kozak + ATG + 147bp high-CUB gene
+    # Using 'GAG' and 'CGC' to simulate strong coding potential
+    upstream_junk = "TGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTG"
+    kozak = "GCCGCCACC"
+    atg = "ATG"
+    downstream_gene = "GAGCGCGAGCGCGAGCGCGAGCGCGAGCGCGAGCGCGAGCGCGAGCGCGAGCGCGAGCGCGAGCGCGAGCGCGAGCGCGAGCGCGAGCGCGAGCGC"
+    
+    test_seq = upstream_junk + kozak + atg + downstream_gene
+    true_tis = len(upstream_junk) + len(kozak)
+    
+    scores = []
+    positions = list(range(50, len(test_seq) - 93))
+    
+    for i in positions:
+        upstream = test_seq[i-50:i]
+        downstream = test_seq[i+3:i+93]
+        
+        if test_seq[i:i+3] != "ATG":
+            scores.append(-20) # Frame failure baseline
+            continue
+            
+        p_score = score_promoter(upstream)
+        cub_score = score_coding_potential(downstream, codon_log_odds_map)
+        scores.append(p_score + (cub_score * 2.0))
+
+    plt.style.use('seaborn-v0_8-whitegrid')
+    plt.figure(figsize=(10, 5))
+    
+    plt.plot(positions, scores, color='#C44E52', lw=2)
+    plt.axvline(x=true_tis, color='black', linestyle='--', label=f'True TIS (bp {true_tis})')
+    
+    plt.annotate('Complete score failure\nat +1/-1 frame shift', 
+                 xy=(true_tis+1, -15), xytext=(true_tis+15, -5),
+                 arrowprops=dict(facecolor='black', shrink=0.05), fontsize=10)
+
+    plt.title("Explainable 1-bp Resolution via Codon Tokenization", fontsize=14, fontweight='bold')
+    plt.xlabel("Genomic Position (bp)", fontsize=12)
+    plt.ylabel("Contextual Prediction Score (PWM + CUB Log-Odds)", fontsize=12)
+    plt.xlim([true_tis - 20, true_tis + 30])
+    plt.ylim([-25, max(scores) + 5])
+    plt.legend()
+    
+    plt.tight_layout()
+    plt.savefig("ieee_resolution_sharpness.png", dpi=300)
+    plt.close()
+    print("[✔] Saved -> ieee_resolution_sharpness.png")
+
+def testingFromjson(filepath="testing_sources.json"):
+    testing_sources = load_training_sources(filepath)
+    if not testing_sources: return
+
+    # Initialize dictionaries for all 5 versions
+    versions = ["naive", "baseline", "v1", "v2", "v3", "hmm"]
+    all_metrics = {v: [] for v in versions}
+    tprs = {v: [] for v in versions}
+    aucs = {v: [] for v in versions}
+    cms = {v: np.zeros((2, 2), dtype=int) for v in versions}
+    
+    mean_fpr = np.linspace(0, 1, 100)
+
+    for source in testing_sources:
+        species_name = source['name']
+        print(f"\n>>> Evaluating Species: {species_name}")
+
+        fetch_args = {"db": "nucleotide", "id": source["id"], "rettype": "gbwithparts", "retmode": "text"}
+        if source.get("start") and source.get("stop"):
+            fetch_args["seq_start"], fetch_args["seq_stop"] = source["start"], source["stop"]
+
+        try:
+            with Entrez.efetch(**fetch_args) as handle:
+                rec_test = SeqIO.read(handle, "genbank")
+        except Exception as e:
+            print(f"      [!] Fetch Failed: {e}")
+            continue # Skip to the next species if network times out
+
+        test_data = prepare_test_data(rec_test)
+        if not test_data: continue
+
+        # Generate results for all decoders
+        results = {
+            "naive": evaluate(decoder_stride1_naive, "naive", test_data),
+            "baseline": evaluate(decoder_baseline, "baseline", test_data),
+            "v1": evaluate(decoder_v1, "v1", test_data),
+            "v2": evaluate(decoder_v2, "v2", test_data),
+            "v3": evaluate(decoder_v3, "v3", test_data),
+            "hmm": evaluate(decoder_hmm, "hmm", test_data)  # <-- ADD THIS
+        }
+
+        # Store results for each version
+        for ver in versions:
+            res = results[ver]
+            fpr, tpr, _ = roc_curve(res["y_true"], res["y_scores"])
+            interp_tpr = np.interp(mean_fpr, fpr, tpr)
+            interp_tpr[0] = 0.0
+            
+            tprs[ver].append(interp_tpr)
+            aucs[ver].append(auc(fpr, tpr))
+            cms[ver] += confusion_matrix(res["y_true"], res["y_pred"], labels=[0, 1])
+            
+            # Save metrics to list for CSV export
+            clean_res = {k: v for k, v in res.items() if k not in ['y_true', 'y_pred', 'y_scores']}
+            clean_res['species'] = species_name
+            all_metrics[ver].append(clean_res)
+
+    # Export all 5 CSVs
+    for ver in versions:
+        if all_metrics[ver]:
+            pd.DataFrame(all_metrics[ver]).to_csv(f"all_species_results_{ver}.csv", index=False)
+    
+    print("\n[✔] All metrics saved to CSV.")
+    generate_aggregate_diagnostics_v3(tprs, aucs, mean_fpr, cms)
+    
+# ─────────────────────────────────────────────
+# MAIN EXECUTION
+# ─────────────────────────────────────────────
+def main():
+    print("test")
+    parser = argparse.ArgumentParser(description="Biological Gatekeeper v3 Benchmark")
+    parser.add_argument('--model_file', type=str, default='model.pkl', help='Path to model file')
+    parser.add_argument('--test_json', type=str, default='testing_sources.json', help='Testing targets')
+    parser.add_argument('--gen_sharpness', action='store_true', help='Generate IEEE Sharpness Plot')
+    args = parser.parse_args()
+
+    # FIX 1: Add hmm_emissions_bg and hmm_emissions_cds to the global declaration
+    global pwm_logo, codon_vocab, emissions, log_emissions, codon_log_odds_map, hmm_emissions_bg, hmm_emissions_cds
+
+    if os.path.exists(args.model_file):
+        print(f"Loading model from {args.model_file}...")
+        with open(args.model_file, 'rb') as f:
+            model_data = pickle.load(f)
+        
+        pwm_logo = model_data['pwm_logo']
+        codon_vocab = model_data['codon_vocab']
+        emissions = model_data['emissions']
+        log_emissions = model_data['log_emissions']
+        codon_log_odds_map = model_data.get('codon_log_odds') 
+        
+        hmm_emissions_bg = model_data.get('hmm_emissions_bg')
+        hmm_emissions_cds = model_data.get('hmm_emissions_cds')
+        
+        # Check if any required HMM or v3 keys are missing in the cached model
+        if codon_log_odds_map is None or hmm_emissions_bg is None:
+            print("[!] Model file lacks required v3/HMM parameters. Re-training required.")
+            model_data = train_model()
+            pwm_logo = model_data['pwm_logo']
+            codon_vocab = model_data['codon_vocab']
+            emissions = model_data['emissions']
+            log_emissions = model_data['log_emissions']
+            codon_log_odds_map = model_data['codon_log_odds']
+            
+            # FIX 2: Unpack HMM matrices after retraining
+            hmm_emissions_bg = model_data['hmm_emissions_bg']
+            hmm_emissions_cds = model_data['hmm_emissions_cds']
+            
+            with open(args.model_file, 'wb') as f: pickle.dump(model_data, f)
+    else:
+        print(f"Model file not found. Training new v3 model...")
+        model_data = train_model()
+        pwm_logo = model_data['pwm_logo']
+        codon_vocab = model_data['codon_vocab']
+        emissions = model_data['emissions']
+        log_emissions = model_data['log_emissions']
+        codon_log_odds_map = model_data['codon_log_odds']
+        
+        # FIX 2: Unpack HMM matrices after a fresh training run
+        hmm_emissions_bg = model_data['hmm_emissions_bg']
+        hmm_emissions_cds = model_data['hmm_emissions_cds']
+        
+        with open(args.model_file, 'wb') as f: pickle.dump(model_data, f)
+        print(f"Model saved to {args.model_file}.")
+
+    # Generate IEEE Sharpness Plot if flagged
+    if args.gen_sharpness:
+        plot_resolution_sharpness()
+        return # Exit early if only plotting was requested
+
+    # Run Pipeline
+    testingFromjson(args.test_json)
+
+if __name__ == '__main__':
+    main()
