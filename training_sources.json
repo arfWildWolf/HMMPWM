@@ -3,72 +3,84 @@
     "name": "Human (Mammal)",
     "id": "NC_000001.11",
     "start": 19000,
-    "stop": 1700000
+    "stop": 1700000,
+    "clade": "mammal"
   },
   {
     "name": "Human (Mammal - Chr 17)",
     "id": "NC_000017.11",
     "start": 1500,
-    "stop": 2000000
+    "stop": 2000000,
+    "clade": "mammal"
   },
   {
     "name": "Mouse (Mammal - Chr 19)",
     "id": "NC_000085.7",
     "start": 3900,
-    "stop": 2000000
+    "stop": 2000000,
+    "clade": "mammal"
   },
   {
     "name": "Arabidopsis (Plant - Chr 1)",
     "id": "NC_003070.9",
     "start": 5000000,
-    "stop": 6000000
+    "stop": 6000000,
+    "clade": "plant"
   },
   {
     "name": "Fruit Fly (Insect - Chr 4)",
     "id": "NC_004353.4",
     "start": 100000,
-    "stop": 1100000
+    "stop": 1100000,
+    "clade": "non_mammal_animal"
   },
   {
     "name": "Zebrafish (Fish - Chr 10)",
     "id": "NC_007121.7",
     "start": 10000000,
-    "stop": 12000000
+    "stop": 12000000,
+    "clade": "non_mammal_animal"
   },
   {
     "name": "GUE Human Core Promoter (Chr 22)",
     "id": "NC_000022.11",
     "start": 20000000,
-    "stop": 22000000
+    "stop": 22000000,
+    "clade": "mammal"
   },
   {
     "name": "GUE Human Splice Site (Chr 19)",
     "id": "NC_000019.10",
     "start": 30000000,
-    "stop": 32000000
+    "stop": 32000000,
+    "clade": "mammal"
   },
   {
     "name": "GUE Mouse TF Binding (Chr 11)",
     "id": "NC_000077.7",
     "start": 50000000,
-    "stop": 52000000
+    "stop": 52000000,
+    "clade": "mammal"
   },
   {
     "name": "GUE SARS-CoV-2 Variant (Full Genome)",
     "id": "NC_045512.2",
     "start": 1,
-    "stop": 29903
+    "stop": 29903,
+    "clade": "virus"
   },
   {
     "name": "GUE Species Classification (E. coli K-12)",
     "id": "NC_000913.3",
     "start": 500000,
-    "stop": 641652
+    "stop": 641652,
+    "clade": "prokaryote"
   },
   {
     "name": "GUE Fruit Fly Regulatory (Chr 3L)",
     "id": "NT_033779.5",
     "start": 10000000,
-    "stop": 12000000
+    "stop": 12000000,
+    "clade": "non_mammal_animal"
   }
 ]

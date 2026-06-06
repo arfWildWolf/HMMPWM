@@ -3,36 +3,42 @@
     "name": "Human (Mammal - Held-out Region)",
     "id": "NC_000001.11",
     "start": 5000000,
-    "stop": 7000000
+    "stop": 7000000,
+    "clade": "mammal"
   },
   {
     "name": "Mouse (Mammal - Held-out Region)",
     "id": "NC_000085.7",
     "start": 14000000,
-    "stop": 16000000
+    "stop": 16000000,
+    "clade": "mammal"
   },
   {
     "name": "Arabidopsis (Plant - Held-out Region)",
     "id": "NC_003070.9",
     "start": 9000000,
-    "stop": 11000000
+    "stop": 11000000,
+    "clade": "plant"
   },
   {
     "name": "Yeast (Fungi - Unseen Clade)",
     "id": "NC_001136.10",
     "start": 400000,
-    "stop": 900000
+    "stop": 900000,
+    "clade": "fungi"
   },
   {
     "name": "Worm (Nematode - Unseen Clade)",
     "id": "NC_003279.8",
     "start": 5000000,
-    "stop": 7000000
+    "stop": 7000000,
+    "clade": "nematode"
   },
   {
     "name": "GUE C. elegans Histone (Nematode)",
     "id": "NC_003280.10",
     "start": 3000000,
-    "stop": 5000000
+    "stop": 5000000,
+    "clade": "nematode"
   }
 ]
