@@ -6,29 +6,30 @@
     <title>Gatekeeper TIS Predictor</title>
     <style>
         :root {
-            --bg: #f8fafc;
-            --surface: #ffffff;
-            --border: #e2e8f0;
-            --primary: #2563eb;
-            --primary-hover: #1d4ed8;
-            --text-main: #0f172a;
-            --text-muted: #64748b;
-            --track-color: #cbd5e1;
-            --tis-color: #ef4444;
-            --btn-alt-bg: #f1f5f9;
-            --btn-alt-hover: #e2e8f0;
+            /* Dark Theme Variables */
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --border: #334155;
+            --primary: #38bdf8;
+            --primary-hover: #0284c7;
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --track-color: #475569;
+            --tis-color: #f43f5e;
+            --btn-alt-bg: #334155;
+            --btn-alt-hover: #475569;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
         
         body { background-color: var(--bg); color: var(--text-main); padding: 2rem; display: flex; flex-direction: column; align-items: center; }
         
-        .dashboard { background: var(--surface); width: 100%; max-width: 900px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); overflow: hidden; margin-bottom: 2rem; }
+        .dashboard { background: var(--surface); width: 100%; max-width: 900px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.5); overflow: hidden; margin-bottom: 2rem; border: 1px solid var(--border); }
         
         .header { padding: 1.5rem; border-bottom: 1px solid var(--border); }
         .header h1 { font-size: 1.5rem; font-weight: 600; }
         
-        .tabs { display: flex; border-bottom: 1px solid var(--border); background: #f1f5f9; }
+        .tabs { display: flex; border-bottom: 1px solid var(--border); background: #0f172a; }
         .tab-btn { flex: 1; padding: 1rem; border: none; background: none; font-weight: 500; color: var(--text-muted); cursor: pointer; transition: all 0.2s; }
         .tab-btn:hover { color: var(--text-main); }
         .tab-btn.active { background: var(--surface); color: var(--primary); border-bottom: 2px solid var(--primary); }
@@ -38,47 +39,61 @@
         
         .form-group { margin-bottom: 1rem; }
         label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.5rem; }
-        input[type="text"], input[type="number"], textarea { width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px; font-size: 1rem; }
+        
+        input[type="text"], input[type="number"], textarea, select { 
+            width: 100%; 
+            padding: 0.75rem; 
+            border: 1px solid var(--border); 
+            border-radius: 6px; 
+            font-size: 1rem; 
+            background: var(--bg); 
+            color: var(--text-main); 
+        }
         textarea { height: 120px; resize: vertical; font-family: monospace; }
-        select { padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.95rem; background: var(--surface); color: var(--text-main); }
         
-        .calc-note { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem; background: #f8fafc; padding: 0.5rem; border-radius: 4px; border: 1px dashed var(--border); }
+        .calc-note { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem; background: var(--bg); padding: 0.5rem; border-radius: 4px; border: 1px dashed var(--border); }
         
-        .dropzone { border: 2px dashed var(--border); border-radius: 8px; padding: 2rem; text-align: center; color: var(--text-muted); cursor: pointer; transition: border-color 0.2s; }
+        .dropzone { border: 2px dashed var(--border); border-radius: 8px; padding: 2rem; text-align: center; color: var(--text-muted); cursor: pointer; transition: border-color 0.2s; background: var(--bg); }
         .dropzone:hover { border-color: var(--primary); }
         .dropzone input { display: none; }
         
-        .action-bar { padding: 1.5rem; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: #f8fafc;}
+        .action-bar { padding: 1.5rem; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: #0f172a;}
         .left-actions { display: flex; align-items: center; gap: 1rem; }
         .right-actions { display: flex; align-items: center; gap: 1rem; }
         .error-text { color: var(--tis-color); font-size: 0.9rem; font-weight: 500; display: none; }
         
         button.run-btn { background: var(--primary); color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
         button.run-btn:hover { background: var(--primary-hover); }
-        button.run-btn:disabled { background: var(--track-color); cursor: not-allowed; }
+        button.run-btn:disabled { background: var(--track-color); cursor: not-allowed; color: var(--text-muted); }
 
         /* Visualization Area */
-        .viz-container { background: var(--surface); width: 100%; max-width: 900px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); padding: 2rem; display: none; }
+        .viz-container { background: var(--surface); width: 100%; max-width: 900px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.5); padding: 2rem; display: none; border: 1px solid var(--border); }
         
-        /* Updated Viz Header for new buttons */
         .viz-header { margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: flex-start; }
-        .viz-header-controls { display: flex; gap: 0.75rem; }
+        .viz-header-controls { display: flex; gap: 0.75rem; flex-wrap: wrap; justify-content: flex-end; }
+        
         button.action-btn { background: var(--btn-alt-bg); color: var(--text-main); border: 1px solid var(--border); padding: 0.5rem 1rem; border-radius: 6px; font-weight: 500; cursor: pointer; transition: background 0.2s; font-size: 0.9rem; }
         button.action-btn:hover { background: var(--btn-alt-hover); }
-        button.export-btn { background: #10b981; color: white; border: none; } /* Green for CSV */
+        button.export-btn { background: #10b981; color: white; border: none; } 
         button.export-btn:hover { background: #059669; }
 
         .stats { display: flex; gap: 2rem; font-size: 0.9rem; color: var(--text-muted); margin-top: 0.5rem; }
         .stat-box strong { color: var(--text-main); font-size: 1.1rem; display: block; }
         
-        .track-wrapper { position: relative; width: 100%; height: 150px; overflow-x: auto; overflow-y: hidden; }
+        .track-wrapper { position: relative; width: 100%; height: 160px; overflow-x: hidden; overflow-y: hidden; }
         .svg-track { min-width: 100%; height: 100%; display: block; }
 
         /* List View Styles */
         .list-wrapper { max-height: 300px; overflow-y: auto; padding-right: 1rem; border: 1px solid var(--border); border-radius: 8px; padding: 1rem; background: var(--bg); display: none; }
-        .pos-list { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.5rem; }
-        .pos-item { background: white; border: 1px solid var(--border); padding: 0.5rem; border-radius: 4px; text-align: center; font-family: monospace; font-size: 1.05rem; font-weight: 600; color: var(--tis-color); box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);}
+        .pos-list { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.5rem; }
+        .pos-item { background: var(--surface); border: 1px solid var(--border); padding: 0.5rem; border-radius: 4px; text-align: center; font-family: monospace; font-size: 0.95rem; font-weight: 600; color: var(--primary); box-shadow: 0 1px 2px rgb(0 0 0 / 0.5);}
+        .pos-item span { color: var(--text-muted); font-size: 0.8rem; display: block; font-weight: normal; }
         .empty-state { color: var(--text-muted); font-style: italic; grid-column: 1 / -1; }
+
+        /* SVG Glow class */
+        .glow-filter { filter: url(#glow); }
+        /* Add pointer cursor for hover states on compressed ticks */
+        .highlight-tick { cursor: pointer; }
     </style>
 </head>
 <body>
@@ -154,6 +169,7 @@
                 </div>
             </div>
             <div class="viz-header-controls">
+                <button id="toggle-expand-btn" class="action-btn" onclick="toggleExpansion()">Expand Track</button>
                 <button id="toggle-view-btn" class="action-btn" onclick="toggleViewMode()">View as List</button>
                 <button class="action-btn export-btn" onclick="exportToCSV()">Export to CSV</button>
             </div>
@@ -172,9 +188,10 @@
         const API_BASE = "http://localhost:8000";
         let activeTab = 'ncbi';
         
-        // Global state variable to hold current data for exports & toggles
+        // Global state variables
         let latestResults = null;
         let isListView = false;
+        let isExpanded = false; // Controls compressed vs expanded track mode
 
         function switchTab(tabId) {
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -193,13 +210,10 @@
                 note.innerText = "Codon-Aligned Range: Waiting for input...";
                 return;
             }
-
             const start = parseInt(startStr);
             const end = parseInt(endStr);
-            
             const alignedStart = start - (start % 3);
             const alignedEnd = end + ((3 - (end % 3)) % 3);
-            
             note.innerHTML = `<strong>Codon-Aligned Range:</strong> Base ${alignedStart} to ${alignedEnd} <em>(Length: ${alignedEnd - alignedStart} bp)</em>`;
         }
 
@@ -237,7 +251,6 @@
                     const acc = document.getElementById('acc-id').value;
                     const start = document.getElementById('acc-start').value;
                     const end = document.getElementById('acc-end').value;
-                    
                     if(!acc || !start || !end) throw new Error("Please fill all NCBI fields.");
                     
                     const fd = new FormData();
@@ -245,7 +258,6 @@
                     fd.append('start', start);
                     fd.append('end', end);
                     fd.append('strategy', selectedStrategy);
-                    
                     response = await fetch(`${API_BASE}/predict/ncbi`, { method: 'POST', body: fd });
                 } 
                 else if (activeTab === 'upload') {
@@ -255,7 +267,6 @@
                     const fd = new FormData();
                     fd.append('file', fileInput.files[0]);
                     fd.append('strategy', selectedStrategy);
-                    
                     response = await fetch(`${API_BASE}/predict/file`, { method: 'POST', body: fd });
                 } 
                 else if (activeTab === 'paste') {
@@ -265,7 +276,6 @@
                     const fd = new FormData();
                     fd.append('sequence', seq);
                     fd.append('strategy', selectedStrategy);
-                    
                     response = await fetch(`${API_BASE}/predict/string`, { method: 'POST', body: fd });
                 }
 
@@ -275,7 +285,7 @@
                 }
 
                 const data = await response.json();
-                latestResults = data; // Save to global state
+                latestResults = data;
                 renderVisualization(data);
                 
             } catch (error) {
@@ -286,45 +296,57 @@
             }
         }
 
-        // --- NEW: Toggle between Visual Track and List View ---
         function toggleViewMode() {
             isListView = !isListView;
             const trackView = document.getElementById('track-scroll');
             const listView = document.getElementById('list-scroll');
-            const toggleBtn = document.getElementById('toggle-view-btn');
+            const toggleViewBtn = document.getElementById('toggle-view-btn');
+            const toggleExpandBtn = document.getElementById('toggle-expand-btn');
 
             if (isListView) {
                 trackView.style.display = 'none';
                 listView.style.display = 'block';
-                toggleBtn.innerText = "View as Graphical Track";
+                toggleViewBtn.innerText = "View as Graphical Track";
+                toggleExpandBtn.style.display = 'none'; 
             } else {
                 trackView.style.display = 'block';
                 listView.style.display = 'none';
-                toggleBtn.innerText = "View as List";
+                toggleViewBtn.innerText = "View as List";
+                toggleExpandBtn.style.display = 'inline-block';
             }
         }
 
-        // --- NEW: Export to CSV Logic ---
+        function toggleExpansion() {
+            isExpanded = !isExpanded;
+            const btn = document.getElementById('toggle-expand-btn');
+            if (isExpanded) {
+                btn.innerText = "Compress Track";
+            } else {
+                btn.innerText = "Expand Track";
+            }
+            if (latestResults) renderVisualization(latestResults);
+        }
+
         function exportToCSV() {
-            if (!latestResults || !latestResults.tis_positions) {
+            if (!latestResults) {
                 alert("No prediction data to export.");
                 return;
             }
 
-            // 1. Create CSV Header
-            let csvContent = "data:text/csv;charset=utf-8,";
-            csvContent += "Detected_TIS_Position\n";
+            const details = latestResults.tis_details || (latestResults.tis_positions || []).map(p => ({pos: p, score: "N/A"}));
 
-            // 2. Append Positions
-            if (latestResults.tis_positions.length === 0) {
-                csvContent += "No TIS detected\n";
+            let csvContent = "data:text/csv;charset=utf-8,";
+            csvContent += "Detected_TIS_Position,Score\n";
+
+            if (details.length === 0) {
+                csvContent += "No TIS detected,\n";
             } else {
-                latestResults.tis_positions.forEach(pos => {
-                    csvContent += pos + "\n";
+                details.forEach(item => {
+                    const s = typeof item.score === 'number' ? item.score.toFixed(4) : item.score;
+                    csvContent += `${item.pos},${s}\n`;
                 });
             }
 
-            // 3. Trigger Download (Prompts user based on browser settings)
             const encodedUri = encodeURI(csvContent);
             const link = document.createElement("a");
             link.setAttribute("href", encodedUri);
@@ -335,96 +357,142 @@
         }
 
         function renderVisualization(data) {
-            const { sequence_length, offset_start, tis_positions } = data;
+            const { sequence_length, offset_start } = data;
+            const details = data.tis_details || (data.tis_positions || []).map(p => ({pos: p, score: 1.0}));
             
             document.getElementById('viz').style.display = 'block';
             document.getElementById('stat-len').innerText = `${sequence_length} bp`;
-            document.getElementById('stat-count').innerText = tis_positions.length;
+            document.getElementById('stat-count').innerText = details.length;
 
             // --- 1. RENDER LIST VIEW ---
             const ul = document.getElementById('positions-list');
             ul.innerHTML = '';
-            if (tis_positions.length === 0) {
+            if (details.length === 0) {
                 ul.innerHTML = '<li class="empty-state">No TIS candidates detected by the model in this sequence.</li>';
             } else {
-                tis_positions.forEach(pos => {
+                details.forEach(item => {
                     const li = document.createElement('li');
                     li.className = 'pos-item';
-                    li.innerText = pos;
+                    const scoreDisplay = typeof item.score === 'number' ? item.score.toFixed(2) : '1.0';
+                    li.innerHTML = `Pos: ${item.pos} <span>Score: ${scoreDisplay}</span>`;
                     ul.appendChild(li);
                 });
             }
 
             // --- 2. RENDER GRAPHICAL SVG ---
             const svg = document.getElementById('svg-canvas');
-            svg.innerHTML = ''; 
-
-            const trackHeight = 150;
-            const paddingX = 40;
-            const baseWidth = document.getElementById('track-scroll').clientWidth;
             
-            const minWidthPerMarker = 80; 
-            const requiredWidth = Math.max(baseWidth, (tis_positions.length * minWidthPerMarker) + (paddingX * 2));
+            // Re-inject the SVG Glow Filter definition
+            svg.innerHTML = `
+                <defs>
+                    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+                        <feGaussianBlur stdDeviation="3" result="blur" />
+                        <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                    </filter>
+                </defs>
+            `;
+
+            const trackHeight = 160;
+            const paddingX = 40;
+            const containerWidth = document.getElementById('track-scroll').clientWidth;
+            
+            let requiredWidth;
+            if (isExpanded) {
+                const minWidthPerMarker = 80; 
+                requiredWidth = Math.max(containerWidth, (details.length * minWidthPerMarker) + (paddingX * 2));
+                document.getElementById('track-scroll').style.overflowX = "auto";
+            } else {
+                requiredWidth = containerWidth;
+                document.getElementById('track-scroll').style.overflowX = "hidden";
+            }
+
             svg.setAttribute('width', requiredWidth);
             svg.setAttribute('height', trackHeight);
 
             const drawAreaWidth = requiredWidth - (paddingX * 2);
 
+            // Base track line
             const trackLine = document.createElementNS("http://www.w3.org/2000/svg", "rect");
             trackLine.setAttribute("x", paddingX);
-            trackLine.setAttribute("y", 90);
+            trackLine.setAttribute("y", 100);
             trackLine.setAttribute("width", drawAreaWidth);
-            trackLine.setAttribute("height", 12);
-            trackLine.setAttribute("rx", 6);
+            trackLine.setAttribute("height", 10);
+            trackLine.setAttribute("rx", 5);
             trackLine.setAttribute("fill", "var(--track-color)");
             svg.appendChild(trackLine);
 
-            tis_positions.forEach(pos => {
-                const relativePos = pos - offset_start;
+            details.forEach(item => {
+                const relativePos = item.pos - offset_start;
                 const ratio = relativePos / sequence_length;
                 const x = paddingX + (ratio * drawAreaWidth);
 
+                let rawScore = typeof item.score === 'number' ? item.score : 1.0;
+                let opacity = Math.max(0.3, Math.min(1.0, rawScore));
+                const glowColor = `rgba(136, 220, 192, ${opacity})`; 
+
                 const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                group.setAttribute("class", "glow-filter");
 
-                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                line.setAttribute("x1", x);
-                line.setAttribute("y1", 40);
-                line.setAttribute("x2", x);
-                line.setAttribute("y2", 90);
-                line.setAttribute("stroke", "var(--tis-color)");
-                line.setAttribute("stroke-width", "3");
-                group.appendChild(line);
+                if (!isExpanded) {
+                    // COMPRESSED MODE: Just a glowing notch on the track
+                    const notch = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                    notch.setAttribute("x", x - 3);
+                    notch.setAttribute("y", 95); // Slightly overlaps the track vertically
+                    notch.setAttribute("width", 6);
+                    notch.setAttribute("height", 20);
+                    notch.setAttribute("rx", 3);
+                    notch.setAttribute("fill", glowColor);
+                    notch.setAttribute("class", "highlight-tick");
 
-                const arrow = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-                arrow.setAttribute("points", `${x-6},80 ${x+6},80 ${x},95`);
-                arrow.setAttribute("fill", "var(--tis-color)");
-                group.appendChild(arrow);
+                    // Native SVG hover tooltip for the notch
+                    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+                    title.textContent = `Pos: ${item.pos}\nScore: ${rawScore.toFixed(2)}`;
+                    notch.appendChild(title);
 
-                const textBg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-                textBg.setAttribute("x", x - 35);
-                textBg.setAttribute("y", 15);
-                textBg.setAttribute("width", 70);
-                textBg.setAttribute("height", 20);
-                textBg.setAttribute("rx", 4);
-                textBg.setAttribute("fill", "var(--tis-color)");
-                group.appendChild(textBg);
+                    group.appendChild(notch);
+                } else {
+                    // EXPANDED MODE: Full pin, arrow, pill, and text
+                    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    line.setAttribute("x1", x);
+                    line.setAttribute("y1", 50);
+                    line.setAttribute("x2", x);
+                    line.setAttribute("y2", 100);
+                    line.setAttribute("stroke", glowColor);
+                    line.setAttribute("stroke-width", "3");
+                    group.appendChild(line);
 
-                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-                text.setAttribute("x", x);
-                text.setAttribute("y", 29);
-                text.setAttribute("text-anchor", "middle");
-                text.setAttribute("fill", "white");
-                text.setAttribute("font-size", "12px");
-                text.setAttribute("font-weight", "bold");
-                text.textContent = `Pos: ${pos}`;
-                group.appendChild(text);
+                    const arrow = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+                    arrow.setAttribute("points", `${x-6},90 ${x+6},90 ${x},105`);
+                    arrow.setAttribute("fill", glowColor);
+                    group.appendChild(arrow);
+
+                    const textBg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                    textBg.setAttribute("x", x - 35);
+                    textBg.setAttribute("y", 25);
+                    textBg.setAttribute("width", 70);
+                    textBg.setAttribute("height", 20);
+                    textBg.setAttribute("rx", 4);
+                    textBg.setAttribute("fill", glowColor);
+                    group.appendChild(textBg);
+
+                    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                    text.setAttribute("x", x);
+                    text.setAttribute("y", 39);
+                    text.setAttribute("text-anchor", "middle");
+                    text.setAttribute("fill", "#ffffff"); 
+                    text.setAttribute("font-size", "11px");
+                    text.setAttribute("font-weight", "bold");
+                    text.textContent = `Pos: ${item.pos}`;
+                    group.appendChild(text);
+                }
 
                 svg.appendChild(group);
             });
 
-            if (tis_positions.length > 0 && !isListView) {
-                const firstRatio = (tis_positions[0] - offset_start) / sequence_length;
-                const scrollX = (firstRatio * drawAreaWidth) - (baseWidth / 2);
+            // Auto-scroll logic only applies when expanded
+            if (details.length > 0 && isExpanded && !isListView) {
+                const firstRatio = (details[0].pos - offset_start) / sequence_length;
+                const scrollX = (firstRatio * drawAreaWidth) - (containerWidth / 2);
                 document.getElementById('track-scroll').scrollLeft = Math.max(0, scrollX);
             }
         }
