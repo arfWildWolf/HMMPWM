@@ -15,6 +15,8 @@
             --text-muted: #64748b;
             --track-color: #cbd5e1;
             --tis-color: #ef4444;
+            --btn-alt-bg: #f1f5f9;
+            --btn-alt-hover: #e2e8f0;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
@@ -57,13 +59,26 @@
 
         /* Visualization Area */
         .viz-container { background: var(--surface); width: 100%; max-width: 900px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); padding: 2rem; display: none; }
-        .viz-header { margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center; }
+        
+        /* Updated Viz Header for new buttons */
+        .viz-header { margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: flex-start; }
+        .viz-header-controls { display: flex; gap: 0.75rem; }
+        button.action-btn { background: var(--btn-alt-bg); color: var(--text-main); border: 1px solid var(--border); padding: 0.5rem 1rem; border-radius: 6px; font-weight: 500; cursor: pointer; transition: background 0.2s; font-size: 0.9rem; }
+        button.action-btn:hover { background: var(--btn-alt-hover); }
+        button.export-btn { background: #10b981; color: white; border: none; } /* Green for CSV */
+        button.export-btn:hover { background: #059669; }
+
+        .stats { display: flex; gap: 2rem; font-size: 0.9rem; color: var(--text-muted); margin-top: 0.5rem; }
+        .stat-box strong { color: var(--text-main); font-size: 1.1rem; display: block; }
         
         .track-wrapper { position: relative; width: 100%; height: 150px; overflow-x: auto; overflow-y: hidden; }
         .svg-track { min-width: 100%; height: 100%; display: block; }
-        
-        .stats { display: flex; gap: 2rem; font-size: 0.9rem; color: var(--text-muted); }
-        .stat-box strong { color: var(--text-main); font-size: 1.1rem; display: block; }
+
+        /* List View Styles */
+        .list-wrapper { max-height: 300px; overflow-y: auto; padding-right: 1rem; border: 1px solid var(--border); border-radius: 8px; padding: 1rem; background: var(--bg); display: none; }
+        .pos-list { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.5rem; }
+        .pos-item { background: white; border: 1px solid var(--border); padding: 0.5rem; border-radius: 4px; text-align: center; font-family: monospace; font-size: 1.05rem; font-weight: 600; color: var(--tis-color); box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);}
+        .empty-state { color: var(--text-muted); font-style: italic; grid-column: 1 / -1; }
     </style>
 </head>
 <body>
@@ -131,21 +146,35 @@
 
     <div id="viz" class="viz-container">
         <div class="viz-header">
-            <h2>Structural Prediction</h2>
-            <div class="stats">
-                <div class="stat-box">Length: <strong id="stat-len">-</strong></div>
-                <div class="stat-box">TIS Detected: <strong id="stat-count">-</strong></div>
+            <div>
+                <h2>Structural Prediction</h2>
+                <div class="stats">
+                    <div class="stat-box">Length: <strong id="stat-len">-</strong></div>
+                    <div class="stat-box">TIS Detected: <strong id="stat-count">-</strong></div>
+                </div>
+            </div>
+            <div class="viz-header-controls">
+                <button id="toggle-view-btn" class="action-btn" onclick="toggleViewMode()">View as List</button>
+                <button class="action-btn export-btn" onclick="exportToCSV()">Export to CSV</button>
             </div>
         </div>
         
         <div class="track-wrapper" id="track-scroll">
             <svg id="svg-canvas" class="svg-track"></svg>
         </div>
+
+        <div class="list-wrapper" id="list-scroll">
+            <ul class="pos-list" id="positions-list"></ul>
+        </div>
     </div>
 
     <script>
         const API_BASE = "http://localhost:8000";
         let activeTab = 'ncbi';
+        
+        // Global state variable to hold current data for exports & toggles
+        let latestResults = null;
+        let isListView = false;
 
         function switchTab(tabId) {
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -199,7 +228,6 @@
             btn.innerText = "Predicting...";
             document.getElementById('viz').style.display = 'none';
 
-            // GRAB STRATEGY FROM UI
             const selectedStrategy = document.getElementById('model-strategy').value;
 
             try {
@@ -216,7 +244,7 @@
                     fd.append('accession', acc);
                     fd.append('start', start);
                     fd.append('end', end);
-                    fd.append('strategy', selectedStrategy); // APPEND STRATEGY
+                    fd.append('strategy', selectedStrategy);
                     
                     response = await fetch(`${API_BASE}/predict/ncbi`, { method: 'POST', body: fd });
                 } 
@@ -226,7 +254,7 @@
                     
                     const fd = new FormData();
                     fd.append('file', fileInput.files[0]);
-                    fd.append('strategy', selectedStrategy); // APPEND STRATEGY
+                    fd.append('strategy', selectedStrategy);
                     
                     response = await fetch(`${API_BASE}/predict/file`, { method: 'POST', body: fd });
                 } 
@@ -236,7 +264,7 @@
                     
                     const fd = new FormData();
                     fd.append('sequence', seq);
-                    fd.append('strategy', selectedStrategy); // APPEND STRATEGY
+                    fd.append('strategy', selectedStrategy);
                     
                     response = await fetch(`${API_BASE}/predict/string`, { method: 'POST', body: fd });
                 }
@@ -247,6 +275,7 @@
                 }
 
                 const data = await response.json();
+                latestResults = data; // Save to global state
                 renderVisualization(data);
                 
             } catch (error) {
@@ -257,6 +286,54 @@
             }
         }
 
+        // --- NEW: Toggle between Visual Track and List View ---
+        function toggleViewMode() {
+            isListView = !isListView;
+            const trackView = document.getElementById('track-scroll');
+            const listView = document.getElementById('list-scroll');
+            const toggleBtn = document.getElementById('toggle-view-btn');
+
+            if (isListView) {
+                trackView.style.display = 'none';
+                listView.style.display = 'block';
+                toggleBtn.innerText = "View as Graphical Track";
+            } else {
+                trackView.style.display = 'block';
+                listView.style.display = 'none';
+                toggleBtn.innerText = "View as List";
+            }
+        }
+
+        // --- NEW: Export to CSV Logic ---
+        function exportToCSV() {
+            if (!latestResults || !latestResults.tis_positions) {
+                alert("No prediction data to export.");
+                return;
+            }
+
+            // 1. Create CSV Header
+            let csvContent = "data:text/csv;charset=utf-8,";
+            csvContent += "Detected_TIS_Position\n";
+
+            // 2. Append Positions
+            if (latestResults.tis_positions.length === 0) {
+                csvContent += "No TIS detected\n";
+            } else {
+                latestResults.tis_positions.forEach(pos => {
+                    csvContent += pos + "\n";
+                });
+            }
+
+            // 3. Trigger Download (Prompts user based on browser settings)
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "gatekeeper_tis_predictions.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
         function renderVisualization(data) {
             const { sequence_length, offset_start, tis_positions } = data;
             
@@ -264,15 +341,28 @@
             document.getElementById('stat-len').innerText = `${sequence_length} bp`;
             document.getElementById('stat-count').innerText = tis_positions.length;
 
-            const svg = document.getElementById('svg-canvas');
-            svg.innerHTML = ''; // Clear old
+            // --- 1. RENDER LIST VIEW ---
+            const ul = document.getElementById('positions-list');
+            ul.innerHTML = '';
+            if (tis_positions.length === 0) {
+                ul.innerHTML = '<li class="empty-state">No TIS candidates detected by the model in this sequence.</li>';
+            } else {
+                tis_positions.forEach(pos => {
+                    const li = document.createElement('li');
+                    li.className = 'pos-item';
+                    li.innerText = pos;
+                    ul.appendChild(li);
+                });
+            }
 
-            // Base SVG settings
+            // --- 2. RENDER GRAPHICAL SVG ---
+            const svg = document.getElementById('svg-canvas');
+            svg.innerHTML = ''; 
+
             const trackHeight = 150;
             const paddingX = 40;
             const baseWidth = document.getElementById('track-scroll').clientWidth;
             
-            // If sequence is huge, force the SVG to be wider so labels don't crash into each other
             const minWidthPerMarker = 80; 
             const requiredWidth = Math.max(baseWidth, (tis_positions.length * minWidthPerMarker) + (paddingX * 2));
             svg.setAttribute('width', requiredWidth);
@@ -280,7 +370,6 @@
 
             const drawAreaWidth = requiredWidth - (paddingX * 2);
 
-            // Draw thick base track
             const trackLine = document.createElementNS("http://www.w3.org/2000/svg", "rect");
             trackLine.setAttribute("x", paddingX);
             trackLine.setAttribute("y", 90);
@@ -290,7 +379,6 @@
             trackLine.setAttribute("fill", "var(--track-color)");
             svg.appendChild(trackLine);
 
-            // Draw TIS Markers
             tis_positions.forEach(pos => {
                 const relativePos = pos - offset_start;
                 const ratio = relativePos / sequence_length;
@@ -334,7 +422,7 @@
                 svg.appendChild(group);
             });
 
-            if (tis_positions.length > 0) {
+            if (tis_positions.length > 0 && !isListView) {
                 const firstRatio = (tis_positions[0] - offset_start) / sequence_length;
                 const scrollX = (firstRatio * drawAreaWidth) - (baseWidth / 2);
                 document.getElementById('track-scroll').scrollLeft = Math.max(0, scrollX);
