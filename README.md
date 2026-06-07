@@ -31,6 +31,7 @@ Ensure you have Python 3.8 or newer installed on your system. Open your terminal
 
 ```powershell
 pip install fastapi uvicorn biopython pandas scikit-learn seaborn matplotlib python-multipart
+```
 
 ### Step 2: First-Time Initialization (Training the Model)
 Before the web interface can work, Gatekeeper must download the genetic data from NCBI, align the sequences, and compile the ensemble_model.pkl weight file.
@@ -39,10 +40,9 @@ Open your terminal in the project folder.
 
 Run the core script:
 
-PowerShell
-
-
+```powerShell
 python biogatekeeper.py
+```
 Wait for completion. The script will print its progress as it pulls sequences from NCBI, trains the clade-specific matrices, and trains the Decision Tree.
 
 Once finished, you will see a new file appear in your folder named ensemble_model.pkl.
@@ -52,10 +52,9 @@ Once finished, you will see a new file appear in your folder named ensemble_mode
 ### Step 3: Start the Backend Server
 Leave your terminal open and start the FastAPI server that powers the web interface:
 
-PowerShell
-
-
+```powerShell
 uvicorn app:app --reload
+```
 (If PowerShell gives you an error saying uvicorn is not recognized, use this command instead: python -m uvicorn app:app --reload)
 
 You should see a message saying: Application startup complete. Keep this terminal window open in the background.
