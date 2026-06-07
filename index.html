@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gatekeeper TIS Predictor</title>
+    <style>
+        :root {
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --border: #e2e8f0;
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --track-color: #cbd5e1;
+            --tis-color: #ef4444;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        
+        body { background-color: var(--bg); color: var(--text-main); padding: 2rem; display: flex; flex-direction: column; align-items: center; }
+        
+        .dashboard { background: var(--surface); width: 100%; max-width: 900px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); overflow: hidden; margin-bottom: 2rem; }
+        
+        .header { padding: 1.5rem; border-bottom: 1px solid var(--border); }
+        .header h1 { font-size: 1.5rem; font-weight: 600; }
+        
+        .tabs { display: flex; border-bottom: 1px solid var(--border); background: #f1f5f9; }
+        .tab-btn { flex: 1; padding: 1rem; border: none; background: none; font-weight: 500; color: var(--text-muted); cursor: pointer; transition: all 0.2s; }
+        .tab-btn:hover { color: var(--text-main); }
+        .tab-btn.active { background: var(--surface); color: var(--primary); border-bottom: 2px solid var(--primary); }
+        
+        .tab-content { padding: 1.5rem; display: none; }
+        .tab-content.active { display: block; }
+        
+        .form-group { margin-bottom: 1rem; }
+        label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.5rem; }
+        input[type="text"], input[type="number"], textarea { width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px; font-size: 1rem; }
+        textarea { height: 120px; resize: vertical; font-family: monospace; }
+        select { padding: 0.5rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.95rem; background: var(--surface); color: var(--text-main); }
+        
+        .calc-note { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem; background: #f8fafc; padding: 0.5rem; border-radius: 4px; border: 1px dashed var(--border); }
+        
+        .dropzone { border: 2px dashed var(--border); border-radius: 8px; padding: 2rem; text-align: center; color: var(--text-muted); cursor: pointer; transition: border-color 0.2s; }
+        .dropzone:hover { border-color: var(--primary); }
+        .dropzone input { display: none; }
+        
+        .action-bar { padding: 1.5rem; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: #f8fafc;}
+        .left-actions { display: flex; align-items: center; gap: 1rem; }
+        .right-actions { display: flex; align-items: center; gap: 1rem; }
+        .error-text { color: var(--tis-color); font-size: 0.9rem; font-weight: 500; display: none; }
+        
+        button.run-btn { background: var(--primary); color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+        button.run-btn:hover { background: var(--primary-hover); }
+        button.run-btn:disabled { background: var(--track-color); cursor: not-allowed; }
+
+        /* Visualization Area */
+        .viz-container { background: var(--surface); width: 100%; max-width: 900px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); padding: 2rem; display: none; }
+        .viz-header { margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center; }
+        
+        .track-wrapper { position: relative; width: 100%; height: 150px; overflow-x: auto; overflow-y: hidden; }
+        .svg-track { min-width: 100%; height: 100%; display: block; }
+        
+        .stats { display: flex; gap: 2rem; font-size: 0.9rem; color: var(--text-muted); }
+        .stat-box strong { color: var(--text-main); font-size: 1.1rem; display: block; }
+    </style>
+</head>
+<body>
+
+    <div class="dashboard">
+        <div class="header">
+            <h1>Gatekeeper Meta-Ensemble</h1>
+        </div>
+        
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('ncbi')">NCBI Accession</button>
+            <button class="tab-btn" onclick="switchTab('upload')">Upload Fasta/Txt</button>
+            <button class="tab-btn" onclick="switchTab('paste')">Paste String</button>
+        </div>
+
+        <div id="ncbi" class="tab-content active">
+            <div class="form-group">
+                <label>Accession ID</label>
+                <input type="text" id="acc-id" placeholder="e.g., NM_001126112.2">
+            </div>
+            <div style="display: flex; gap: 1rem;">
+                <div class="form-group" style="flex: 1;">
+                    <label>Start Range</label>
+                    <input type="number" id="acc-start" placeholder="e.g., 1000" oninput="updateAlignment()">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label>End Range</label>
+                    <input type="number" id="acc-end" placeholder="e.g., 2500" oninput="updateAlignment()">
+                </div>
+            </div>
+            <div class="calc-note" id="alignment-note">
+                Codon-Aligned Range: Waiting for input... (Will snap start down and end up to ensure % 3 == 0)
+            </div>
+        </div>
+
+        <div id="upload" class="tab-content">
+            <div class="dropzone" onclick="document.getElementById('file-input').click()">
+                <p id="file-label">Click to select or drag and drop a .fasta or .txt file here.</p>
+                <input type="file" id="file-input" accept=".fasta,.txt,.fa" onchange="updateFileLabel()">
+            </div>
+        </div>
+
+        <div id="paste" class="tab-content">
+            <div class="form-group">
+                <label>Raw Nucleotide Sequence</label>
+                <textarea id="raw-seq" placeholder="ATGGCC..."></textarea>
+            </div>
+        </div>
+
+        <div class="action-bar">
+            <div class="left-actions">
+                <label style="margin:0;"><strong>Model:</strong></label>
+                <select id="model-strategy">
+                    <option value="v3">V3 (Contextual Gatekeeper)</option>
+                    <option value="hmm_tokenized">HMM (Viterbi Tokenized)</option>
+                    <option value="baseline">Baseline (Naive Tokenized)</option>
+                </select>
+            </div>
+            <div class="right-actions">
+                <div id="error-msg" class="error-text"></div>
+                <button id="run-btn" class="run-btn" onclick="runPrediction()">Run Gatekeeper Prediction</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="viz" class="viz-container">
+        <div class="viz-header">
+            <h2>Structural Prediction</h2>
+            <div class="stats">
+                <div class="stat-box">Length: <strong id="stat-len">-</strong></div>
+                <div class="stat-box">TIS Detected: <strong id="stat-count">-</strong></div>
+            </div>
+        </div>
+        
+        <div class="track-wrapper" id="track-scroll">
+            <svg id="svg-canvas" class="svg-track"></svg>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = "http://localhost:8000";
+        let activeTab = 'ncbi';
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            event.currentTarget.classList.add('active');
+            activeTab = tabId;
+        }
+
+        function updateAlignment() {
+            const startStr = document.getElementById('acc-start').value;
+            const endStr = document.getElementById('acc-end').value;
+            const note = document.getElementById('alignment-note');
+            
+            if(!startStr || !endStr) {
+                note.innerText = "Codon-Aligned Range: Waiting for input...";
+                return;
+            }
+
+            const start = parseInt(startStr);
+            const end = parseInt(endStr);
+            
+            const alignedStart = start - (start % 3);
+            const alignedEnd = end + ((3 - (end % 3)) % 3);
+            
+            note.innerHTML = `<strong>Codon-Aligned Range:</strong> Base ${alignedStart} to ${alignedEnd} <em>(Length: ${alignedEnd - alignedStart} bp)</em>`;
+        }
+
+        function updateFileLabel() {
+            const fileInput = document.getElementById('file-input');
+            const label = document.getElementById('file-label');
+            if(fileInput.files.length > 0) {
+                label.innerText = `Selected: ${fileInput.files[0].name}`;
+            }
+        }
+
+        function showError(msg) {
+            const err = document.getElementById('error-msg');
+            err.innerText = msg;
+            err.style.display = 'block';
+        }
+
+        function hideError() {
+            document.getElementById('error-msg').style.display = 'none';
+        }
+
+        async function runPrediction() {
+            hideError();
+            const btn = document.getElementById('run-btn');
+            btn.disabled = true;
+            btn.innerText = "Predicting...";
+            document.getElementById('viz').style.display = 'none';
+
+            // GRAB STRATEGY FROM UI
+            const selectedStrategy = document.getElementById('model-strategy').value;
+
+            try {
+                let response;
+                
+                if (activeTab === 'ncbi') {
+                    const acc = document.getElementById('acc-id').value;
+                    const start = document.getElementById('acc-start').value;
+                    const end = document.getElementById('acc-end').value;
+                    
+                    if(!acc || !start || !end) throw new Error("Please fill all NCBI fields.");
+                    
+                    const fd = new FormData();
+                    fd.append('accession', acc);
+                    fd.append('start', start);
+                    fd.append('end', end);
+                    fd.append('strategy', selectedStrategy); // APPEND STRATEGY
+                    
+                    response = await fetch(`${API_BASE}/predict/ncbi`, { method: 'POST', body: fd });
+                } 
+                else if (activeTab === 'upload') {
+                    const fileInput = document.getElementById('file-input');
+                    if(fileInput.files.length === 0) throw new Error("Please select a file.");
+                    
+                    const fd = new FormData();
+                    fd.append('file', fileInput.files[0]);
+                    fd.append('strategy', selectedStrategy); // APPEND STRATEGY
+                    
+                    response = await fetch(`${API_BASE}/predict/file`, { method: 'POST', body: fd });
+                } 
+                else if (activeTab === 'paste') {
+                    const seq = document.getElementById('raw-seq').value;
+                    if(!seq || seq.length < 53) throw new Error("Sequence must be at least 53bp long.");
+                    
+                    const fd = new FormData();
+                    fd.append('sequence', seq);
+                    fd.append('strategy', selectedStrategy); // APPEND STRATEGY
+                    
+                    response = await fetch(`${API_BASE}/predict/string`, { method: 'POST', body: fd });
+                }
+
+                if (!response.ok) {
+                    const errData = await response.json();
+                    throw new Error(errData.detail || "Server Error");
+                }
+
+                const data = await response.json();
+                renderVisualization(data);
+                
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "Run Gatekeeper Prediction";
+            }
+        }
+
+        function renderVisualization(data) {
+            const { sequence_length, offset_start, tis_positions } = data;
+            
+            document.getElementById('viz').style.display = 'block';
+            document.getElementById('stat-len').innerText = `${sequence_length} bp`;
+            document.getElementById('stat-count').innerText = tis_positions.length;
+
+            const svg = document.getElementById('svg-canvas');
+            svg.innerHTML = ''; // Clear old
+
+            // Base SVG settings
+            const trackHeight = 150;
+            const paddingX = 40;
+            const baseWidth = document.getElementById('track-scroll').clientWidth;
+            
+            // If sequence is huge, force the SVG to be wider so labels don't crash into each other
+            const minWidthPerMarker = 80; 
+            const requiredWidth = Math.max(baseWidth, (tis_positions.length * minWidthPerMarker) + (paddingX * 2));
+            svg.setAttribute('width', requiredWidth);
+            svg.setAttribute('height', trackHeight);
+
+            const drawAreaWidth = requiredWidth - (paddingX * 2);
+
+            // Draw thick base track
+            const trackLine = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            trackLine.setAttribute("x", paddingX);
+            trackLine.setAttribute("y", 90);
+            trackLine.setAttribute("width", drawAreaWidth);
+            trackLine.setAttribute("height", 12);
+            trackLine.setAttribute("rx", 6);
+            trackLine.setAttribute("fill", "var(--track-color)");
+            svg.appendChild(trackLine);
+
+            // Draw TIS Markers
+            tis_positions.forEach(pos => {
+                const relativePos = pos - offset_start;
+                const ratio = relativePos / sequence_length;
+                const x = paddingX + (ratio * drawAreaWidth);
+
+                const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                line.setAttribute("x1", x);
+                line.setAttribute("y1", 40);
+                line.setAttribute("x2", x);
+                line.setAttribute("y2", 90);
+                line.setAttribute("stroke", "var(--tis-color)");
+                line.setAttribute("stroke-width", "3");
+                group.appendChild(line);
+
+                const arrow = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+                arrow.setAttribute("points", `${x-6},80 ${x+6},80 ${x},95`);
+                arrow.setAttribute("fill", "var(--tis-color)");
+                group.appendChild(arrow);
+
+                const textBg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                textBg.setAttribute("x", x - 35);
+                textBg.setAttribute("y", 15);
+                textBg.setAttribute("width", 70);
+                textBg.setAttribute("height", 20);
+                textBg.setAttribute("rx", 4);
+                textBg.setAttribute("fill", "var(--tis-color)");
+                group.appendChild(textBg);
+
+                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                text.setAttribute("x", x);
+                text.setAttribute("y", 29);
+                text.setAttribute("text-anchor", "middle");
+                text.setAttribute("fill", "white");
+                text.setAttribute("font-size", "12px");
+                text.setAttribute("font-weight", "bold");
+                text.textContent = `Pos: ${pos}`;
+                group.appendChild(text);
+
+                svg.appendChild(group);
+            });
+
+            if (tis_positions.length > 0) {
+                const firstRatio = (tis_positions[0] - offset_start) / sequence_length;
+                const scrollX = (firstRatio * drawAreaWidth) - (baseWidth / 2);
+                document.getElementById('track-scroll').scrollLeft = Math.max(0, scrollX);
+            }
+        }
+    </script>
+</body>
+</html>
