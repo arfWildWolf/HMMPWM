@@ -1,0 +1,16 @@
+================================================================================
+NCBI EXTRACTION LOG & METADATA PROFILE: NC_001136
+================================================================================
+
+Target Given Name   : Yeast (Fungi - Unseen Clade)
+Assigned Clade      : fungi
+NCBI Accession ID   : NC_001136.10
+Description line    : Saccharomyces cerevisiae S288C chromosome IV, complete sequence
+Extracted Length    : 500002 base pairs
+Requested Start-Stop: 400000 to 900000
+Aligned Start-Stop  : 399999 to 900000
+
+--------------------------------------------------------------------------------
+GENE FEATURE LOCATIONS MAPPED WITHIN THIS SLICE
+--------------------------------------------------------------------------------
+Feature #1 [CDS]: Slice Relative Coordinates: 0 -> 640 | Strand Direction: [+]

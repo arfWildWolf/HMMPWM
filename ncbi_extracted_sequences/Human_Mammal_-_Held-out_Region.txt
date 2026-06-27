@@ -1,0 +1,16 @@
+================================================================================
+NCBI EXTRACTION LOG & METADATA PROFILE: NC_000001
+================================================================================
+
+Target Given Name   : Human (Mammal - Held-out Region)
+Assigned Clade      : mammal
+NCBI Accession ID   : NC_000001.11
+Description line    : Homo sapiens chromosome 1, GRCh38.p14 Primary Assembly
+Extracted Length    : 2000005 base pairs
+Requested Start-Stop: 5000000 to 7000000
+Aligned Start-Stop  : 4999998 to 7000002
+
+--------------------------------------------------------------------------------
+GENE FEATURE LOCATIONS MAPPED WITHIN THIS SLICE
+--------------------------------------------------------------------------------
+Feature #1 [CDS]: Slice Relative Coordinates: 863267 -> 986292 | Strand Direction: [-]

@@ -7,7 +7,8 @@ from sklearn.metrics import (
     f1_score, matthews_corrcoef, mean_absolute_error,
     confusion_matrix, roc_auc_score, roc_curve, auc, balanced_accuracy_score
 )
-from sklearn.tree import DecisionTreeClassifier # NEW: Meta-Classifier
+from sklearn.tree import DecisionTreeClassifier 
+from sklearn.linear_model import LogisticRegression # NEW: Logistic Regression Baseline
 import seaborn as sns
 import warnings
 import matplotlib.pyplot as plt
@@ -31,13 +32,15 @@ log_emissions = None
 codon_log_odds_map = None  
 hmm_emissions_bg = None
 hmm_emissions_cds = None
+lr_model = None # Global instance for Logistic Regression Baseline
+lr_codon_model = None # NEW: Global instance for LR with Codon Tokenization
 
 # Ensemble Parameters
 meta_tree = None
 clade_models = {}
 
 class GatekeeperDeployer:
-    def __init__(self, model_path='ensemble_model.pkl'):
+    def __init__(self, model_path='ensemble_model.pkl', pwm_thresh=-5.0, cub_wt=2.0):
         """Loads the serialized meta-ensemble parameters."""
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model not found at {model_path}. Train first.")
@@ -47,6 +50,12 @@ class GatekeeperDeployer:
             
         self.meta_tree = model_data.get('meta_tree')
         self.clade_models = model_data.get('clade_models', {})
+        self.lr_model = model_data.get('lr_model') # Load LR Model
+        self.lr_codon_model = model_data.get('lr_codon_model') # NEW: Load LR Codon Model
+        
+        # REVISION 1: Instance attributes for decoders
+        self.pwm_threshold = pwm_thresh
+        self.cub_weight = cub_wt
         
         if not self.clade_models:
             raise ValueError("Corrupted model file: No clade matrices found.")
@@ -102,7 +111,7 @@ class GatekeeperDeployer:
                 # Now it will continue scanning the rest of the sequence for more ATGs.
         return path
 
-    def _decoder_v3(self, seq_str, tokens, params, pwm_threshold=-5.0, cub_weight=2.0):
+    def _decoder_v3(self, seq_str, tokens, params):
         path = [0] * len(tokens)
         for t, tok in enumerate(tokens):
             if tok == params['codon_vocab'].get("ATG"):
@@ -112,15 +121,42 @@ class GatekeeperDeployer:
                 
                 if len(upstream) == 50 and len(downstream) >= 90:
                     p_score = self._score_promoter(upstream, params['pwm_logo'])
-                    # If it passes the basic PWM threshold, evaluate it
-                    if p_score >= pwm_threshold:
+                    # Evaluasi via parameter instansiasi (Revision 1)
+                    if p_score >= self.pwm_threshold:
                         cub_score = self._score_cub(downstream, params['codon_log_odds'])
                         
-                        # REMOVED the max() bottleneck. 
-                        # Now, if the combined context score is strong enough (e.g., > 0), 
-                        # we plot it as a valid predicted TIS.
-                        if p_score + (cub_score * cub_weight) > 0.0:
+                        if p_score + (cub_score * self.cub_weight) > 0.0:
                             path[t] = 1
+        return path
+
+    def _decoder_logistic_regression(self, seq_str, tokens):
+        path = [0] * len(tokens)
+        if not getattr(self, 'lr_model', None): return path
+        
+        for t, tok in enumerate(tokens):
+            if tok == self.default_params['codon_vocab'].get("ATG"):
+                nuc_idx = t * 3
+                downstream = seq_str[nuc_idx+3:nuc_idx+93]
+                if len(downstream) == 90:
+                    feats = extract_kmer_features(downstream)
+                    prob = self.lr_model.predict_proba([feats])[0][1]
+                    if prob > 0.5:
+                        path[t] = 1
+        return path
+
+    def _decoder_logistic_regression_codon(self, seq_str, tokens):
+        path = [0] * len(tokens)
+        if not getattr(self, 'lr_codon_model', None): return path
+        
+        for t, tok in enumerate(tokens):
+            if tok == self.default_params['codon_vocab'].get("ATG"):
+                nuc_idx = t * 3
+                downstream = seq_str[nuc_idx+3:nuc_idx+93]
+                if len(downstream) == 90:
+                    feats = extract_codon_features(downstream)
+                    prob = self.lr_codon_model.predict_proba([feats])[0][1]
+                    if prob > 0.5:
+                        path[t] = 1
         return path
 
     def _decoder_hmm_tokenized(self, seq_str, tokens, params):
@@ -199,6 +235,10 @@ class GatekeeperDeployer:
             return self._decoder_v3(seq_str, tokens, model_params)
         elif strategy == "hmm_tokenized":
             return self._decoder_hmm_tokenized(seq_str, tokens, model_params)
+        elif strategy == "logistic_regression":
+            return self._decoder_logistic_regression(seq_str, tokens)
+        elif strategy == "logistic_regression_codon":
+            return self._decoder_logistic_regression_codon(seq_str, tokens)
         else:
             raise ValueError(f"Unknown decoding strategy: '{strategy}'.")
 
@@ -338,8 +378,28 @@ def decoder_hmm_stride1(seq_str, tokens):
     return out_path
 
 # ─────────────────────────────────────────────
-# SCORING FUNCTIONS
+# SCORING & FEATURE EXTRACTION
 # ─────────────────────────────────────────────
+def extract_kmer_features(seq):
+    """Generates a fixed-size array of 3-mer (tri-nucleotide) frequencies for ML."""
+    codons = [a+b+c for a in "ACGT" for b in "ACGT" for c in "ACGT"]
+    counts = {c: 0 for c in codons}
+    for i in range(len(seq)-2): # STRIDE = 1
+        tri = seq[i:i+3]
+        if tri in counts: counts[tri] += 1
+    tot = sum(counts.values()) or 1
+    return [counts[c]/tot for c in codons]
+
+def extract_codon_features(seq):
+    """Generates a fixed-size array of codon frequencies (Stride-3) for ML."""
+    codons = [a+b+c for a in "ACGT" for b in "ACGT" for c in "ACGT"]
+    counts = {c: 0 for c in codons}
+    for i in range(0, len(seq)-2, 3): # STRIDE = 3 (Tokenized)
+        codon = seq[i:i+3]
+        if codon in counts: counts[codon] += 1
+    tot = sum(counts.values()) or 1
+    return [counts[c]/tot for c in codons]
+
 def score_promoter(window):
     if len(window) != 50:
         return -999.0
@@ -442,8 +502,12 @@ def train_model(filepath="training_sources.json"):
         clade_groups[clade].append(src)
         
     final_models = {}
-    dt_X = [] # Features for Decision Tree
-    dt_y = [] # Labels for Decision Tree
+    dt_X = [] 
+    dt_y = [] 
+    lr_X = [] # Data for Logistic Regression Features
+    lr_y = [] # Labels for Logistic Regression (1=TIS, 0=Background)
+    lr_codon_X = [] # NEW: Data for LR Codon Tokenized Features
+    lr_codon_y = [] # NEW: Labels for LR Codon
     
     all_codons = [a+b+c for a in "ACGT" for b in "ACGT" for c in "ACGT"]
     codon_vocab_val = {c: i for i, c in enumerate(all_codons)}
@@ -484,9 +548,15 @@ def train_model(filepath="training_sources.json"):
                             if codon in cds_counts: cds_counts[codon] += 1
                         source_cds_count += 1
                         
-                        # Collect Data for Decision Tree
                         dt_X.append(extract_taxonomic_features(seq_str))
                         dt_y.append(clade)
+
+                        # Logistic Regression TIS Injection
+                        if len(downstream) == 90:
+                            lr_X.append(extract_kmer_features(downstream))
+                            lr_y.append(1)
+                            lr_codon_X.append(extract_codon_features(downstream))
+                            lr_codon_y.append(1)
                         
             # Intergenic extraction
             last_end = 0
@@ -500,9 +570,15 @@ def train_model(filepath="training_sources.json"):
                             if codon in bg_counts: bg_counts[codon] += 1
                         bg_count += 1
                         
-                        # Background sequences also get fed to DT
                         dt_X.append(extract_taxonomic_features(bg_chunk))
                         dt_y.append(clade)
+
+                        # Logistic Regression Background Injection
+                        lr_X.append(extract_kmer_features(bg_chunk))
+                        lr_y.append(0)
+                        lr_codon_X.append(extract_codon_features(bg_chunk))
+                        lr_codon_y.append(0)
+
                 last_end = max(last_end, int(end))
                 
         # Finalize Clade-Specific Model Matrices
@@ -524,14 +600,40 @@ def train_model(filepath="training_sources.json"):
         print(f"    [✔] Mined {source_cds_count} CDS & {bg_count} BG for {clade}.")
 
     print("\n2. Training Decision Tree Meta-Classifier...")
-    tree_clf = DecisionTreeClassifier(max_depth=5, random_state=42)
+    # REVISION 1: Strict Hyperparameter enforcement
+    tree_clf = DecisionTreeClassifier(
+        criterion='entropy',
+        max_depth=5, 
+        min_samples_split=20,
+        min_samples_leaf=10,
+        class_weight='balanced',
+        random_state=42
+    )
     if dt_X and len(set(dt_y)) > 1:
         tree_clf.fit(dt_X, dt_y)
         print(f"    [✔] Tree trained on {len(dt_X)} samples targeting {len(set(dt_y))} clades.")
     else:
         print("    [!] Insufficient clades/data for Decision Tree. Using mock fallback.")
         
-    return {'meta_tree': tree_clf, 'clade_models': final_models}
+    print("\n3. Training Logistic Regression Baseline (K-mers)...")
+    lr_clf = LogisticRegression(C=1.0, solver='liblinear', max_iter=100, random_state=42)
+    if lr_X and len(set(lr_y)) > 1:
+        lr_clf.fit(lr_X, lr_y)
+        print(f"    [✔] LR Model trained on {len(lr_X)} samples using 64-dim K-mers.")
+    else:
+        lr_clf = None
+        print("    [!] Insufficient data for Logistic Regression.")
+
+    print("\n4. Training Logistic Regression (Codon Tokenized)...")
+    lr_codon_clf = LogisticRegression(C=1.0, solver='liblinear', max_iter=100, random_state=42)
+    if lr_codon_X and len(set(lr_codon_y)) > 1:
+        lr_codon_clf.fit(lr_codon_X, lr_codon_y)
+        print(f"    [✔] LR Codon Model trained on {len(lr_codon_X)} samples using 64-dim Stride-3 Codons.")
+    else:
+        lr_codon_clf = None
+        print("    [!] Insufficient data for Logistic Regression (Codon).")
+        
+    return {'meta_tree': tree_clf, 'clade_models': final_models, 'lr_model': lr_clf, 'lr_codon_model': lr_codon_clf}
 
 def decoder_hmm(seq_str, tokens, p_start=1e-4, p_stop=1e-3, pwm_weight=1.5):
     """
@@ -667,8 +769,51 @@ def decoder_meta_router(seq_str, tokens):
     return decoder_hmm_tokenized(seq_str, tokens)
 
 # ─────────────────────────────────────────────
-# DECODERS (v1, v2, v3)
+# DECODERS (v1, v2, v3, LR)
 # ─────────────────────────────────────────────
+def decoder_logistic_regression_codon(seq_str, tokens):
+    global lr_codon_model, codon_vocab
+    path = [0] * len(tokens)
+    if not lr_codon_model: return path
+    
+    candidates = []
+    for t, tok in enumerate(tokens):
+        if tok == codon_vocab.get("ATG"):
+            nuc_idx = t * 3
+            downstream = seq_str[nuc_idx+3:nuc_idx+93]
+            if len(downstream) == 90:
+                feats = extract_codon_features(downstream)
+                prob = lr_codon_model.predict_proba([feats])[0][1]
+                if prob > 0.5:
+                    candidates.append((prob, t))
+    
+    if candidates:
+        _, best_start = max(candidates)
+        path[best_start] = 1
+        for i in range(best_start+1, len(tokens)): path[i] = 2
+    return path
+
+def decoder_logistic_regression(seq_str, tokens):
+    global lr_model, codon_vocab
+    path = [0] * len(tokens)
+    if not lr_model: return path
+    
+    candidates = []
+    for t, tok in enumerate(tokens):
+        if tok == codon_vocab.get("ATG"):
+            nuc_idx = t * 3
+            downstream = seq_str[nuc_idx+3:nuc_idx+93]
+            if len(downstream) == 90:
+                feats = extract_kmer_features(downstream)
+                prob = lr_model.predict_proba([feats])[0][1]
+                if prob > 0.5:
+                    candidates.append((prob, t))
+    
+    if candidates:
+        _, best_start = max(candidates)
+        path[best_start] = 1
+        for i in range(best_start+1, len(tokens)): path[i] = 2
+    return path
 
 def decoder_stride1_naive(seq_str, tokens):
     """
@@ -877,14 +1022,14 @@ def evaluate(decoder_fn, label, test_data):
 # ─────────────────────────────────────────────
 def generate_aggregate_diagnostics_v3(tprs_dict, aucs_dict, mean_fpr, cms_dict):
     plt.style.use('seaborn-v0_8-whitegrid')
-    # Expanded grid matrix to 8 rows to evaluate the new meta_router model
-    fig, axes = plt.subplots(8, 2, figsize=(15, 40)) 
+    # Expanded grid matrix to 10 rows to include the LR Codon model
+    fig, axes = plt.subplots(10, 2, figsize=(15, 50)) 
     fig.suptitle("Cross-Eukaryotic TIS Prediction Benchmark", 
                  fontsize=22, fontweight='bold', y=0.98)
 
-    versions = ["naive", "baseline", "v1", "v2", "v3", "hmm_tokenized", "hmm_stride1", "meta_router"]
-    colors = ['#000000', '#808080', '#4C72B0', '#55A868', '#C44E52', '#8172B3', '#CCB974', '#1F77B4']
-    cm_cmaps = ['Greys', 'Purples', 'Blues', 'Greens', 'Reds', 'Oranges', 'YlGnBu', 'GnBu']
+    versions = ["naive", "baseline", "v1", "v2", "v3", "hmm_tokenized", "hmm_stride1", "meta_router", "logistic_regression", "logistic_regression_codon"]
+    colors = ['#000000', '#808080', '#4C72B0', '#55A868', '#C44E52', '#8172B3', '#CCB974', '#1F77B4', '#E377C2', '#17BECF']
+    cm_cmaps = ['Greys', 'Purples', 'Blues', 'Greens', 'Reds', 'Oranges', 'YlGnBu', 'GnBu', 'PuRd', 'RdPu']
     
     for i, ver in enumerate(versions):
         ax_roc = axes[i, 0]
@@ -993,8 +1138,7 @@ def testingFromjson(filepath="testing_sources.json"):
     # Check cache before evaluating
     records = get_cached_records(filepath, "testing_cache.pkl")
 
-    # Initialize dictionaries for all 7 versions
-    versions = ["naive", "baseline", "v1", "v2", "v3", "hmm_tokenized", "hmm_stride1", "meta_router"]
+    versions = ["naive", "baseline", "v1", "v2", "v3", "hmm_tokenized", "hmm_stride1", "meta_router", "logistic_regression", "logistic_regression_codon"]
     all_metrics = {v: [] for v in versions}
     tprs = {v: [] for v in versions}
     aucs = {v: [] for v in versions}
@@ -1013,7 +1157,6 @@ def testingFromjson(filepath="testing_sources.json"):
         test_data = prepare_test_data(rec_test)
         if not test_data: continue
 
-        # Generate results for all decoders
         results = {
             "naive": evaluate(decoder_stride1_naive, "naive", test_data),
             "baseline": evaluate(decoder_baseline, "baseline", test_data),
@@ -1022,7 +1165,9 @@ def testingFromjson(filepath="testing_sources.json"):
             "v3": evaluate(decoder_v3, "v3", test_data),
             "hmm_tokenized": evaluate(decoder_hmm_tokenized, "hmm_tokenized", test_data),
             "hmm_stride1": evaluate(decoder_hmm_stride1, "hmm_stride1", test_data),
-            "meta_router": evaluate(decoder_meta_router, "meta_router", test_data) # NEW
+            "meta_router": evaluate(decoder_meta_router, "meta_router", test_data),
+            "logistic_regression": evaluate(decoder_logistic_regression, "logistic_regression", test_data),
+            "logistic_regression_codon": evaluate(decoder_logistic_regression_codon, "logistic_regression_codon", test_data) # NEW LR CODON ROUTE
         }
 
         # Store results for each version
@@ -1059,9 +1204,7 @@ def main():
     parser.add_argument('--gen_sharpness', action='store_true', help='Generate IEEE Sharpness Plot')
     args = parser.parse_args()
 
-    global meta_tree, clade_models
-    
-    # Seed the active globals just to prevent initialization errors
+    global meta_tree, clade_models, lr_model, lr_codon_model
     global pwm_logo, codon_vocab, codon_log_odds_map, hmm_emissions_bg, hmm_emissions_cds
 
     if os.path.exists(args.model_file):
@@ -1076,11 +1219,15 @@ def main():
             
         meta_tree = model_data['meta_tree']
         clade_models = model_data['clade_models']
+        lr_model = model_data.get('lr_model') 
+        lr_codon_model = model_data.get('lr_codon_model') # Load LR Codon
     else:
         print(f"Model file not found. Training Ensemble...")
         model_data = train_model()
         meta_tree = model_data['meta_tree']
         clade_models = model_data['clade_models']
+        lr_model = model_data.get('lr_model') 
+        lr_codon_model = model_data.get('lr_codon_model') # Load LR Codon
         with open(args.model_file, 'wb') as f: pickle.dump(model_data, f)
         print(f"Ensemble Model saved to {args.model_file}.")
 

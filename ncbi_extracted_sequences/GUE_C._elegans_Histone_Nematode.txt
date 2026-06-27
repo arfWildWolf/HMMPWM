@@ -1,0 +1,16 @@
+================================================================================
+NCBI EXTRACTION LOG & METADATA PROFILE: NC_003280
+================================================================================
+
+Target Given Name   : GUE C. elegans Histone (Nematode)
+Assigned Clade      : nematode
+NCBI Accession ID   : NC_003280.10
+Description line    : Caenorhabditis elegans chromosome II
+Extracted Length    : 2000002 base pairs
+Requested Start-Stop: 3000000 to 5000000
+Aligned Start-Stop  : 3000000 to 5000001
+
+--------------------------------------------------------------------------------
+GENE FEATURE LOCATIONS MAPPED WITHIN THIS SLICE
+--------------------------------------------------------------------------------
+Feature #1 [CDS]: Slice Relative Coordinates: 341 -> 551 | Strand Direction: [+]

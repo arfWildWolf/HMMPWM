@@ -1,0 +1,16 @@
+================================================================================
+NCBI EXTRACTION LOG & METADATA PROFILE: NC_000085
+================================================================================
+
+Target Given Name   : Mouse (Mammal - Held-out Region)
+Assigned Clade      : mammal
+NCBI Accession ID   : NC_000085.7
+Description line    : Mus musculus strain C57BL/6J chromosome 19, GRCm39
+Extracted Length    : 2000005 base pairs
+Requested Start-Stop: 14000000 to 16000000
+Aligned Start-Stop  : 13999998 to 16000002
+
+--------------------------------------------------------------------------------
+GENE FEATURE LOCATIONS MAPPED WITHIN THIS SLICE
+--------------------------------------------------------------------------------
+Feature #1 [CDS]: Slice Relative Coordinates: 427100 -> 574779 | Strand Direction: [-]

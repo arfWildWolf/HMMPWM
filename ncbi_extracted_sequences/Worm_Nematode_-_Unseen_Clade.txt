@@ -1,0 +1,16 @@
+================================================================================
+NCBI EXTRACTION LOG & METADATA PROFILE: NC_003279
+================================================================================
+
+Target Given Name   : Worm (Nematode - Unseen Clade)
+Assigned Clade      : nematode
+NCBI Accession ID   : NC_003279.8
+Description line    : Caenorhabditis elegans chromosome I
+Extracted Length    : 2000005 base pairs
+Requested Start-Stop: 5000000 to 7000000
+Aligned Start-Stop  : 4999998 to 7000002
+
+--------------------------------------------------------------------------------
+GENE FEATURE LOCATIONS MAPPED WITHIN THIS SLICE
+--------------------------------------------------------------------------------
+Feature #1 [CDS]: Slice Relative Coordinates: 239 -> 2353 | Strand Direction: [+]
